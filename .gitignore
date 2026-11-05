@@ -1,0 +1,8 @@
+server/bucketlist-server
+server/data/
+.env
+android/local.properties
+android/.gradle/
+android/.kotlin/
+android/build/
+android/*/build/
