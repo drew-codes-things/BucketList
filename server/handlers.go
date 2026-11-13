@@ -114,8 +114,8 @@ func (a *API) kdf(w http.ResponseWriter, r *http.Request) {
 }
 
 type createAccountRequest struct {
-	KDF             KDFParams `json:"kdf"`
-	AuthKey         []byte    `json:"authKey"`
+	KDF            KDFParams `json:"kdf"`
+	AuthKey        []byte    `json:"authKey"`
 	WrappedListKey []byte    `json:"wrappedListKey"`
 }
 
@@ -150,7 +150,7 @@ type loginRequest struct {
 }
 
 type loginResponse struct {
-	Token           string `json:"token"`
+	Token          string `json:"token"`
 	WrappedListKey []byte `json:"wrappedListKey"`
 }
 

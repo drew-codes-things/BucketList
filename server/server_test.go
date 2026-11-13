@@ -80,8 +80,8 @@ func authKeyBytes(fill byte) []byte { return bytes.Repeat([]byte{fill}, 32) }
 func (h *harness) setupAccount() {
 	h.t.Helper()
 	body := createAccountRequest{
-		KDF:             KDFParams{Salt: bytes.Repeat([]byte{7}, 16), Iterations: 3, MemoryKiB: 65536, Parallelism: 1},
-		AuthKey:         authKeyBytes(1),
+		KDF:            KDFParams{Salt: bytes.Repeat([]byte{7}, 16), Iterations: 3, MemoryKiB: 65536, Parallelism: 1},
+		AuthKey:        authKeyBytes(1),
 		WrappedListKey: []byte("wrapped"),
 	}
 	response := h.do("POST", "/v1/account", jsonBody(h.t, body), map[string]string{"X-Setup-Token": testSetupToken})

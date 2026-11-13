@@ -40,8 +40,8 @@ type KDFParams struct {
 }
 
 type Account struct {
-	KDF             KDFParams `json:"kdf"`
-	AuthDigest      []byte    `json:"authDigest"`
+	KDF            KDFParams `json:"kdf"`
+	AuthDigest     []byte    `json:"authDigest"`
 	WrappedListKey []byte    `json:"wrappedListKey"`
 }
 
