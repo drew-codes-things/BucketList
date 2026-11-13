@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -627,5 +628,24 @@ func TestItemsStoredBeforeRevisionsStartAtZero(t *testing.T) {
 	}
 	if status := h.authed("PUT", "/v1/files/"+id+"/meta", jsonBody(t, revisionedMetaRequest{Meta: []byte("second"), Revision: 0})).StatusCode; status != http.StatusNoContent {
 		t.Fatalf("update of an older item at revision 0 expected 204, got %d", status)
+	}
+}
+
+func TestUnreadableItemRecordIsLogged(t *testing.T) {
+	h := newHarness(t)
+	h.setupAccount()
+	h.signIn()
+	id := h.createFinishedItem("first")
+	if err := os.WriteFile(filepath.Join(h.dataDir, "files", id, "info.json"), []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var logged bytes.Buffer
+	log.SetOutput(&logged)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	if status := h.authed("GET", "/v1/files", nil).StatusCode; status != http.StatusOK {
+		t.Fatalf("listing expected 200, got %d", status)
+	}
+	if !strings.Contains(logged.String(), id) {
+		t.Fatalf("the unreadable record %s should be logged, log was %q", id, logged.String())
 	}
 }

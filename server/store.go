@@ -324,6 +324,7 @@ func (s *Store) List() ([]FileInfo, error) {
 		dir := filepath.Join(s.root, "files", entry.Name())
 		info, err := s.readInfo(dir)
 		if err != nil {
+			log.Printf("skip unreadable item %s: %v", entry.Name(), err)
 			continue
 		}
 		if !info.Complete {
