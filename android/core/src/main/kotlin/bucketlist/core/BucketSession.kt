@@ -91,14 +91,23 @@ class BucketSession private constructor(val api: BucketApi, listKey: ByteArray) 
     }
 
     companion object {
-        fun createAccount(api: BucketApi, setupToken: String, passphrase: CharArray, params: KdfParams = newKdfParams()): UnlockResult {
+        fun createAccount(
+            api: BucketApi,
+            setupToken: String,
+            passphrase: CharArray,
+            params: KdfParams = newKdfParams(),
+            kdfFloor: KdfFloor = STANDARD_KDF_FLOOR,
+        ): UnlockResult {
+            requireTrustworthyKdf(params, kdfFloor)
             val keys = deriveKeys(passphrase, params)
             api.createAccount(setupToken, params, keys.authKey, wrapListKey(keys.masterKey, randomBytes(KEY_BYTES)))
-            return unlock(api, passphrase)
+            return unlock(api, passphrase, kdfFloor)
         }
 
-        fun unlock(api: BucketApi, passphrase: CharArray): UnlockResult {
-            val keys = deriveKeys(passphrase, api.getKdf())
+        fun unlock(api: BucketApi, passphrase: CharArray, kdfFloor: KdfFloor = STANDARD_KDF_FLOOR): UnlockResult {
+            val kdf = api.getKdf()
+            requireTrustworthyKdf(kdf, kdfFloor)
+            val keys = deriveKeys(passphrase, kdf)
             val login = api.login(keys.authKey)
             val listKey = try {
                 unwrapListKey(keys.masterKey, login.wrappedListKey)

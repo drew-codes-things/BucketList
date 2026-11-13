@@ -16,6 +16,7 @@ private const val PASSPHRASE = "correct horse battery"
 private const val SERVER_START_POLLS = 100
 private const val SERVER_START_POLL_MS = 50L
 private val fastParams = KdfParams(ByteArray(16) { 3 }, 1, 64, 1)
+private val fastFloor = KdfFloor(fastParams.iterations, fastParams.memoryKiB)
 
 class EndToEndTest {
     private var process: Process? = null
@@ -51,9 +52,9 @@ class EndToEndTest {
     }
 
     private fun createList(url: String): BucketSession =
-        BucketSession.createAccount(BucketApi(url), SETUP_TOKEN, PASSPHRASE.toCharArray(), fastParams).session
+        BucketSession.createAccount(BucketApi(url), SETUP_TOKEN, PASSPHRASE.toCharArray(), fastParams, fastFloor).session
 
-    private fun secondPhone(url: String): BucketSession = BucketSession.unlock(BucketApi(url), PASSPHRASE.toCharArray()).session
+    private fun secondPhone(url: String): BucketSession = BucketSession.unlock(BucketApi(url), PASSPHRASE.toCharArray(), fastFloor).session
 
     @Test
     fun bothPhonesShareOneList() {
@@ -108,7 +109,7 @@ class EndToEndTest {
     fun theWrongPasskeyIsRejected() {
         val url = startServer()
         createList(url)
-        val error = assertFailsWith<ApiException> { BucketSession.unlock(BucketApi(url), "wrong passkey here".toCharArray()) }
+        val error = assertFailsWith<ApiException> { BucketSession.unlock(BucketApi(url), "wrong passkey here".toCharArray(), fastFloor) }
         assertEquals(401, error.status)
     }
 
@@ -117,7 +118,7 @@ class EndToEndTest {
         val url = startServer()
         createList(url)
         val error = assertFailsWith<ApiException> {
-            BucketSession.createAccount(BucketApi(url), SETUP_TOKEN, "another passkey".toCharArray(), fastParams)
+            BucketSession.createAccount(BucketApi(url), SETUP_TOKEN, "another passkey".toCharArray(), fastParams, fastFloor)
         }
         assertTrue(error.status == 403 || error.status == 409, "status was ${error.status}")
         assertEquals(0, secondPhone(url).load().items.size)
@@ -127,7 +128,7 @@ class EndToEndTest {
     fun aWrongSetupTokenCannotCreateTheList() {
         val url = startServer()
         val error = assertFailsWith<ApiException> {
-            BucketSession.createAccount(BucketApi(url), "not-the-token", PASSPHRASE.toCharArray(), fastParams)
+            BucketSession.createAccount(BucketApi(url), "not-the-token", PASSPHRASE.toCharArray(), fastParams, fastFloor)
         }
         assertEquals(403, error.status)
     }
@@ -153,7 +154,7 @@ class EndToEndTest {
     @Test
     fun fingerprintStyleUnlockWithTheExportedKeySeesTheSameList() {
         val url = startServer()
-        val first = BucketSession.createAccount(BucketApi(url), SETUP_TOKEN, PASSPHRASE.toCharArray(), fastParams)
+        val first = BucketSession.createAccount(BucketApi(url), SETUP_TOKEN, PASSPHRASE.toCharArray(), fastParams, fastFloor)
         first.session.add("Road trip", "")
         val exported = first.session.exportListKey()
         val api = BucketApi(url)
