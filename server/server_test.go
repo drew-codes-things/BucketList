@@ -649,3 +649,13 @@ func TestUnreadableItemRecordIsLogged(t *testing.T) {
 		t.Fatalf("the unreadable record %s should be logged, log was %q", id, logged.String())
 	}
 }
+
+func TestSlowRequestBodiesAndResponsesTimeOut(t *testing.T) {
+	server := newHTTPServer("127.0.0.1:0", http.NotFoundHandler())
+	if server.ReadTimeout != requestReadTimeout || server.ReadTimeout <= 0 {
+		t.Fatalf("read timeout %v, want %v", server.ReadTimeout, requestReadTimeout)
+	}
+	if server.WriteTimeout != responseWriteTimeout || server.WriteTimeout <= server.ReadTimeout {
+		t.Fatalf("write timeout %v, want %v and longer than the read timeout", server.WriteTimeout, responseWriteTimeout)
+	}
+}

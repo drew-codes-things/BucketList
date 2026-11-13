@@ -21,14 +21,25 @@ func main() {
 	if err != nil {
 		log.Fatalf("load sessions: %v", err)
 	}
-	server := &http.Server{
-		Addr:              address,
-		Handler:           NewAPI(store, auth, setupToken, clientIPHeader),
-		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       2 * time.Minute,
-	}
+	server := newHTTPServer(address, NewAPI(store, auth, setupToken, clientIPHeader))
 	log.Printf("bucketlist listening on %s, data in %s", address, dataDir)
 	log.Fatal(server.ListenAndServe())
+}
+
+const (
+	requestReadTimeout   = 30 * time.Second
+	responseWriteTimeout = 60 * time.Second
+)
+
+func newHTTPServer(address string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              address,
+		Handler:           handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       requestReadTimeout,
+		WriteTimeout:      responseWriteTimeout,
+		IdleTimeout:       2 * time.Minute,
+	}
 }
 
 func envOr(key, fallback string) string {
