@@ -70,8 +70,12 @@ Run it locally:
     BUCKET_DATA=./data BUCKET_SETUP_TOKEN=<random> go run .
     go test -race ./...
 
-Deploy with Docker. Put `BUCKET_SETUP_TOKEN=<random>` in `.env`, then:
+Deploy with Docker. Put `BUCKET_SETUP_TOKEN=<random>` in `.env`. The
+container runs as user 65532 with a read-only root, so create the data
+folder for that user first (Docker would otherwise create it owned by root
+and the server could not write to it), then start it:
 
+    mkdir -p data && sudo chown 65532:65532 data && chmod 700 data
     docker compose up -d --build
 
 It listens on `127.0.0.1:8093`. Publish it with HTTPS through a reverse proxy
