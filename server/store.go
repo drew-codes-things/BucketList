@@ -29,6 +29,7 @@ var (
 	ErrTooLarge       = errors.New("payload too large")
 	ErrAccountExists  = errors.New("account already exists")
 	ErrIncomplete     = errors.New("upload size does not match")
+	ErrStaleRevision  = errors.New("item changed since it was read")
 	idPattern         = regexp.MustCompile(`^[0-9a-f]{32}$`)
 )
 
@@ -52,7 +53,18 @@ type FileInfo struct {
 	HasThumb  bool      `json:"hasThumb"`
 	Complete  bool      `json:"complete"`
 	CreatedAt time.Time `json:"createdAt"`
+	Revision  int64     `json:"revision"`
 }
+
+type StaleRevisionError struct {
+	Current int64
+}
+
+func (e *StaleRevisionError) Error() string {
+	return fmt.Sprintf("%v: now at revision %d", ErrStaleRevision, e.Current)
+}
+
+func (e *StaleRevisionError) Unwrap() error { return ErrStaleRevision }
 
 type Store struct {
 	root  string
@@ -229,7 +241,7 @@ func (s *Store) AppendContent(id string, offset int64, body io.Reader) (int64, e
 	return offset + written, nil
 }
 
-func (s *Store) UpdateMeta(id string, meta []byte) error {
+func (s *Store) UpdateMeta(id string, meta []byte, expectedRevision *int64) error {
 	if len(meta) == 0 || len(meta) > maxMetaBytes {
 		return ErrTooLarge
 	}
@@ -244,7 +256,11 @@ func (s *Store) UpdateMeta(id string, meta []byte) error {
 	if err != nil {
 		return err
 	}
+	if expectedRevision != nil && *expectedRevision != info.Revision {
+		return &StaleRevisionError{Current: info.Revision}
+	}
 	info.Meta = meta
+	info.Revision++
 	return s.writeInfo(dir, info)
 }
 

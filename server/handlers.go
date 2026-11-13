@@ -254,12 +254,23 @@ func (a *API) putThumb(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+type updateMetaRequest struct {
+	Meta     []byte `json:"meta"`
+	Revision *int64 `json:"revision"`
+}
+
 func (a *API) updateMeta(w http.ResponseWriter, r *http.Request) {
-	var request createFileRequest
+	var request updateMetaRequest
 	if !decodeJSON(w, r, &request) {
 		return
 	}
-	if err := a.store.UpdateMeta(r.PathValue("id"), request.Meta); err != nil {
+	err := a.store.UpdateMeta(r.PathValue("id"), request.Meta, request.Revision)
+	var stale *StaleRevisionError
+	if errors.As(err, &stale) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "item changed since it was read", "revision": stale.Current})
+		return
+	}
+	if err != nil {
 		a.storeError(w, err)
 		return
 	}

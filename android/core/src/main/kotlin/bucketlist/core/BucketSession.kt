@@ -4,6 +4,8 @@ import java.io.IOException
 
 private const val READ_ATTEMPTS = 3
 private const val RETRY_BASE_DELAY_MS = 1_000L
+private const val SAVE_ATTEMPTS = 3
+private const val CONFLICT_STATUS = 409
 
 class ListSnapshot(val items: List<BucketItem>, val unreadableCount: Int) {
     val toDo: List<BucketItem> get() = items.filter { !it.isDone }.sortedByDescending { it.createdAtMillis }
@@ -44,7 +46,7 @@ class BucketSession private constructor(val api: BucketApi, listKey: ByteArray) 
 
     fun load(): ListSnapshot = withKey { key ->
         val entries = retryIo(READ_ATTEMPTS, RETRY_BASE_DELAY_MS) { api.listEntries() }
-        val opened = entries.map { entry -> runCatching { BucketItem(entry.id, openItem(key, entry.sealedMeta)) }.getOrNull() }
+        val opened = entries.map { entry -> runCatching { BucketItem(entry.id, openItem(key, entry.sealedMeta), entry.revision) }.getOrNull() }
         ListSnapshot(opened.filterNotNull(), opened.count { it == null })
     }
 
@@ -59,17 +61,47 @@ class BucketSession private constructor(val api: BucketApi, listKey: ByteArray) 
         }
     }
 
-    fun edit(item: BucketItem, title: String, notes: String): BucketItem =
-        save(item, ItemFields(cleanTitle(title), cleanNotes(notes), item.createdAtMillis, item.doneAtMillis))
+    fun edit(item: BucketItem, title: String, notes: String): BucketItem {
+        val newTitle = cleanTitle(title)
+        val newNotes = cleanNotes(notes)
+        val titleChanged = newTitle != item.title
+        val notesChanged = newNotes != item.notes
+        return save(item) { current ->
+            ItemFields(
+                if (titleChanged) newTitle else current.title,
+                if (notesChanged) newNotes else current.notes,
+                current.createdAtMillis,
+                current.doneAtMillis,
+            )
+        }
+    }
 
     fun setDone(item: BucketItem, done: Boolean, nowMillis: Long = System.currentTimeMillis()): BucketItem {
         if (done == item.isDone) return item
-        return save(item, ItemFields(item.title, item.notes, item.createdAtMillis, if (done) nowMillis else null))
+        return save(item) { current ->
+            ItemFields(current.title, current.notes, current.createdAtMillis, if (done) nowMillis else null)
+        }
     }
 
-    private fun save(item: BucketItem, fields: ItemFields): BucketItem {
-        withKey { key -> api.updateMeta(item.id, sealItem(key, fields)) }
-        return BucketItem(item.id, fields)
+    private fun save(item: BucketItem, change: (ItemFields) -> ItemFields): BucketItem {
+        var base = item
+        var attempt = 0
+        while (true) {
+            val fields = change(base.fields)
+            try {
+                withKey { key -> api.updateMeta(base.id, sealItem(key, fields), base.revision) }
+                return BucketItem(base.id, fields, base.revision + 1)
+            } catch (error: ApiException) {
+                attempt++
+                if (error.status != CONFLICT_STATUS || attempt >= SAVE_ATTEMPTS) throw error
+                base = fetchCurrent(base.id)
+            }
+        }
+    }
+
+    private fun fetchCurrent(id: String): BucketItem = withKey { key ->
+        val entry = api.listEntries().firstOrNull { it.id == id } ?: throw ApiException(404, "item was removed")
+        BucketItem(entry.id, openItem(key, entry.sealedMeta), entry.revision)
     }
 
     fun delete(item: BucketItem) = api.delete(item.id)

@@ -33,6 +33,11 @@ class WordingTest {
     }
 
     @Test
+    fun anItemChangedOnBothPhonesAtOnceIsNotCalledAnExistingList() {
+        assertEquals("That item was changed on the other phone too. Try again", describeFailure(ApiException(409, "item changed since it was read"), Stage.CHANGE))
+    }
+
+    @Test
     fun setupAndRateLimitFailuresAreExplained() {
         assertEquals("Setup token rejected", describeFailure(ApiException(403, "forbidden"), Stage.UNLOCK))
         assertEquals("A list already exists on this server", describeFailure(ApiException(409, "exists"), Stage.UNLOCK))

@@ -24,6 +24,7 @@ import javax.crypto.Cipher
 private const val AUTO_LOCK_DELAY_MS = 30_000L
 private const val MIN_PASSPHRASE_LENGTH = 8
 private const val DECLINED_KEY = "declined"
+private val RELOAD_AFTER_STATUSES = setOf(404, 409)
 
 class BucketViewModel(application: Application) : AndroidViewModel(application) {
     private val context: Context get() = getApplication()
@@ -231,7 +232,7 @@ class BucketViewModel(application: Application) : AndroidViewModel(application) 
                 onSuccess()
             } catch (error: Exception) {
                 report(error)
-                if (error is ApiException && error.status == 404) refresh()
+                if (error is ApiException && error.status in RELOAD_AFTER_STATUSES) refresh()
             } finally {
                 saving = false
             }

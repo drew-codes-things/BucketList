@@ -23,7 +23,7 @@ class ItemFields(
     val isDone: Boolean get() = doneAtMillis != null
 }
 
-class BucketItem(val id: String, val fields: ItemFields) {
+class BucketItem(val id: String, val fields: ItemFields, val revision: Long = 0) {
     val title: String get() = fields.title
     val notes: String get() = fields.notes
     val createdAtMillis: Long get() = fields.createdAtMillis

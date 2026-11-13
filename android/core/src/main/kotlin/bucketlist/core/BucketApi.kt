@@ -10,7 +10,7 @@ import java.util.Base64
 
 class ApiException(val status: Int, message: String, val retryAfterSeconds: Int = 0) : IOException(message)
 
-class RemoteEntry(val id: String, val sealedMeta: ByteArray)
+class RemoteEntry(val id: String, val sealedMeta: ByteArray, val revision: Long = 0)
 
 class LoginResult(val token: String, val wrappedListKey: ByteArray)
 
@@ -108,7 +108,7 @@ class BucketApi(baseUrl: String, var token: String? = null) {
         val array = JSONArray(jsonResult(open("GET", "/v1/files"), 200))
         return (0 until array.length()).map { position ->
             val entry = array.getJSONObject(position)
-            RemoteEntry(entry.getString("id"), decode(entry.getString("meta")))
+            RemoteEntry(entry.getString("id"), decode(entry.getString("meta")), entry.optLong("revision", 0))
         }
     }
 
@@ -134,9 +134,9 @@ class BucketApi(baseUrl: String, var token: String? = null) {
         expectNoContent(connection)
     }
 
-    fun updateMeta(id: String, sealedMeta: ByteArray) {
+    fun updateMeta(id: String, sealedMeta: ByteArray, revision: Long) {
         val connection = open("PUT", "/v1/files/$id/meta")
-        sendJson(connection, JSONObject().put("meta", encode(sealedMeta)))
+        sendJson(connection, JSONObject().put("meta", encode(sealedMeta)).put("revision", revision))
         expectNoContent(connection)
     }
 

@@ -127,7 +127,11 @@ the release build with local HTTP allowed, for testing against a server on
 ## Known limits
 
 - Online only: the list needs the server to open or change.
-- If both phones edit the same item at the same moment, the last save wins.
+- If both phones change the same field of one item, the later save wins.
+  Changes to different fields (one ticks it done, the other edits the
+  notes) are both kept: each item carries a revision, a save from an older
+  copy is refused, and the app reloads the item and reapplies only what
+  was changed.
 
 ---
 

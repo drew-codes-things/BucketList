@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -21,10 +23,11 @@ const (
 )
 
 type harness struct {
-	t      *testing.T
-	server *httptest.Server
-	clock  *time.Time
-	token  string
+	t       *testing.T
+	server  *httptest.Server
+	clock   *time.Time
+	token   string
+	dataDir string
 }
 
 func newHarness(t *testing.T) *harness {
@@ -47,7 +50,7 @@ func newHarnessTrusting(t *testing.T, clientIPHeader string) *harness {
 	}
 	server := httptest.NewServer(NewAPI(store, auth, testSetupToken, clientIPHeader))
 	t.Cleanup(server.Close)
-	return &harness{t: t, server: server, clock: &current}
+	return &harness{t: t, server: server, clock: &current, dataDir: dir}
 }
 
 func (h *harness) do(method, path string, body io.Reader, headers map[string]string) *http.Response {
@@ -519,5 +522,110 @@ func TestKnownAddressesAreCappedOldestFirst(t *testing.T) {
 	}
 	if _, ok := auth.knownSources[fmt.Sprintf("source-%d", maxKnownSources)]; !ok {
 		t.Fatal("the newest known address should be kept")
+	}
+}
+
+type revisionedMetaRequest struct {
+	Meta     []byte `json:"meta"`
+	Revision int64  `json:"revision"`
+}
+
+func (h *harness) createFinishedItem(meta string) string {
+	h.t.Helper()
+	var created map[string]string
+	readJSON(h.t, h.authed("POST", "/v1/files", jsonBody(h.t, createFileRequest{Meta: []byte(meta)})), &created)
+	id := created["id"]
+	h.authed("PUT", "/v1/files/"+id+"/content?offset=0", strings.NewReader("x"))
+	h.authed("POST", "/v1/files/"+id+"/finalize", jsonBody(h.t, finalizeRequest{Size: 1}))
+	return id
+}
+
+func (h *harness) listedRevision(id string) int64 {
+	h.t.Helper()
+	var listed []map[string]any
+	readJSON(h.t, h.authed("GET", "/v1/files", nil), &listed)
+	for _, entry := range listed {
+		if entry["id"] == id {
+			revision, ok := entry["revision"].(float64)
+			if !ok {
+				h.t.Fatalf("listing has no revision for %s: %v", id, entry)
+			}
+			return int64(revision)
+		}
+	}
+	h.t.Fatalf("%s not listed", id)
+	return 0
+}
+
+func TestMetaUpdateFromAStaleCopyIsRefused(t *testing.T) {
+	h := newHarness(t)
+	h.setupAccount()
+	h.signIn()
+	id := h.createFinishedItem("first")
+	if revision := h.listedRevision(id); revision != 0 {
+		t.Fatalf("a new item should start at revision 0, got %d", revision)
+	}
+	if status := h.authed("PUT", "/v1/files/"+id+"/meta", jsonBody(t, revisionedMetaRequest{Meta: []byte("second"), Revision: 0})).StatusCode; status != http.StatusNoContent {
+		t.Fatalf("update from the current revision expected 204, got %d", status)
+	}
+	if revision := h.listedRevision(id); revision != 1 {
+		t.Fatalf("revision should be 1 after one update, got %d", revision)
+	}
+	stale := h.authed("PUT", "/v1/files/"+id+"/meta", jsonBody(t, revisionedMetaRequest{Meta: []byte("stale"), Revision: 0}))
+	if stale.StatusCode != http.StatusConflict {
+		t.Fatalf("update from a stale revision expected 409, got %d", stale.StatusCode)
+	}
+	var conflict map[string]any
+	readJSON(t, stale, &conflict)
+	if conflict["revision"] != float64(1) {
+		t.Fatalf("409 should carry the current revision, got %v", conflict)
+	}
+	var listed []FileInfo
+	readJSON(t, h.authed("GET", "/v1/files", nil), &listed)
+	if string(listed[0].Meta) != "second" {
+		t.Fatalf("a refused update must not change the item, got %q", listed[0].Meta)
+	}
+}
+
+func TestMetaUpdateWithoutARevisionStillWorksForOlderApps(t *testing.T) {
+	h := newHarness(t)
+	h.setupAccount()
+	h.signIn()
+	id := h.createFinishedItem("first")
+	if status := h.authed("PUT", "/v1/files/"+id+"/meta", jsonBody(t, createFileRequest{Meta: []byte("second")})).StatusCode; status != http.StatusNoContent {
+		t.Fatalf("update without a revision expected 204, got %d", status)
+	}
+	if revision := h.listedRevision(id); revision != 1 {
+		t.Fatalf("an update without a revision should still count, got %d", revision)
+	}
+}
+
+func TestItemsStoredBeforeRevisionsStartAtZero(t *testing.T) {
+	h := newHarness(t)
+	h.setupAccount()
+	h.signIn()
+	id := h.createFinishedItem("first")
+	path := filepath.Join(h.dataDir, "files", id, "info.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored map[string]any
+	if err := json.Unmarshal(data, &stored); err != nil {
+		t.Fatal(err)
+	}
+	delete(stored, "revision")
+	data, err = json.Marshal(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if revision := h.listedRevision(id); revision != 0 {
+		t.Fatalf("an item stored without a revision should list as 0, got %d", revision)
+	}
+	if status := h.authed("PUT", "/v1/files/"+id+"/meta", jsonBody(t, revisionedMetaRequest{Meta: []byte("second"), Revision: 0})).StatusCode; status != http.StatusNoContent {
+		t.Fatalf("update of an older item at revision 0 expected 204, got %d", status)
 	}
 }

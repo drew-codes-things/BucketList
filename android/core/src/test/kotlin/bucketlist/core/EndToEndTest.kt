@@ -162,4 +162,65 @@ class EndToEndTest {
         val restored = BucketSession.withListKey(api, exported)
         assertEquals(listOf("Road trip"), restored.load().items.map { it.title })
     }
+
+    @Test
+    fun tickingAnOlderCopyKeepsTheOtherPhonesNotes() {
+        val url = startServer()
+        val mine = createList(url)
+        val trip = mine.add("Road trip", "")
+        val theirs = secondPhone(url)
+        val theirCopy = theirs.load().items.single()
+        mine.edit(trip, "Road trip", "Route 66, three weeks")
+
+        theirs.setDone(theirCopy, true, nowMillis = 5_000)
+
+        val after = mine.load().items.single()
+        assertEquals("Route 66, three weeks", after.notes)
+        assertEquals(5_000, after.doneAtMillis)
+    }
+
+    @Test
+    fun editingAnOlderCopyOnlyChangesTheFieldThatWasEdited() {
+        val url = startServer()
+        val mine = createList(url)
+        val trip = mine.add("Road trip", "")
+        val theirs = secondPhone(url)
+        val theirCopy = theirs.load().items.single()
+        mine.edit(trip, "Road trip", "Route 66")
+        mine.setDone(mine.load().items.single(), true, nowMillis = 7_000)
+
+        theirs.edit(theirCopy, "Road trip across America", "")
+
+        val after = mine.load().items.single()
+        assertEquals("Road trip across America", after.title)
+        assertEquals("Route 66", after.notes)
+        assertEquals(7_000, after.doneAtMillis)
+    }
+
+    @Test
+    fun savesInARowFromOnePhoneDoNotConflictWithThemselves() {
+        val url = startServer()
+        val session = createList(url)
+        var item = session.add("Paris", "")
+        repeat(3) { round -> item = session.edit(item, "Paris", "visit $round") }
+        item = session.setDone(item, true, nowMillis = 9_000)
+        val reloaded = session.load().items.single()
+        assertEquals("visit 2", reloaded.notes)
+        assertEquals(9_000, reloaded.doneAtMillis)
+        assertEquals(item.revision, reloaded.revision)
+    }
+
+    @Test
+    fun savingAnItemTheOtherPhoneDeletedSaysItIsGone() {
+        val url = startServer()
+        val mine = createList(url)
+        mine.add("Road trip", "")
+        val theirs = secondPhone(url)
+        val theirCopy = theirs.load().items.single()
+        mine.edit(mine.load().items.single(), "Road trip", "soon")
+        mine.delete(mine.load().items.single())
+
+        val error = assertFailsWith<ApiException> { theirs.setDone(theirCopy, true) }
+        assertEquals(404, error.status)
+    }
 }
