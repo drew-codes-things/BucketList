@@ -75,7 +75,18 @@ Deploy with Docker. Put `BUCKET_SETUP_TOKEN=<random>` in `.env`, then:
     docker compose up -d --build
 
 It listens on `127.0.0.1:8093`. Publish it with HTTPS through a reverse proxy
-or tunnel. The data folder (`BUCKET_DATA_DIR`, default `./data`) is all
+or tunnel.
+
+Wrong passkeys are counted per visitor: five in a row pause logins from that
+address, with the pause doubling up to 15 minutes, and 100 from anywhere pause
+logins for every address that has not signed in during the last 30 days, so
+a phone's usual address keeps working while someone guesses from many others.
+Behind a Cloudflare Tunnel every visitor arrives from the tunnel, so add
+`BUCKET_CLIENT_IP_HEADER=CF-Connecting-IP` to `.env` to count each real
+address. Only set it when the proxy is the one thing that can reach the port,
+since the header is trusted as given.
+
+The data folder (`BUCKET_DATA_DIR`, default `./data`) is all
 ciphertext, so copying it is a full backup or move.
 
 ---

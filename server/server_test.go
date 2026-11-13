@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +12,13 @@ import (
 	"time"
 )
 
-const testSetupToken = "setup-secret"
+const (
+	testSetupToken     = "setup-secret"
+	testClientIPHeader = "CF-Connecting-IP"
+	strangerAddress    = "203.0.113.5"
+	ownerAddress       = "198.51.100.7"
+	ownerNewAddress    = "198.51.100.8"
+)
 
 type harness struct {
 	t      *testing.T
@@ -21,6 +28,11 @@ type harness struct {
 }
 
 func newHarness(t *testing.T) *harness {
+	t.Helper()
+	return newHarnessTrusting(t, "")
+}
+
+func newHarnessTrusting(t *testing.T, clientIPHeader string) *harness {
 	t.Helper()
 	dir := t.TempDir()
 	current := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
@@ -33,7 +45,7 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(NewAPI(store, auth, testSetupToken))
+	server := httptest.NewServer(NewAPI(store, auth, testSetupToken, clientIPHeader))
 	t.Cleanup(server.Close)
 	return &harness{t: t, server: server, clock: &current}
 }
@@ -92,6 +104,10 @@ func (h *harness) setupAccount() {
 
 func (h *harness) login(fill byte) *http.Response {
 	return h.do("POST", "/v1/login", jsonBody(h.t, loginRequest{AuthKey: authKeyBytes(fill)}), nil)
+}
+
+func (h *harness) loginFrom(address string, fill byte) *http.Response {
+	return h.do("POST", "/v1/login", jsonBody(h.t, loginRequest{AuthKey: authKeyBytes(fill)}), map[string]string{testClientIPHeader: address})
 }
 
 func (h *harness) signIn() {
@@ -384,5 +400,124 @@ func TestMetadataCanBeReplaced(t *testing.T) {
 	}
 	if status := h.do("PUT", "/v1/files/"+id+"/meta", jsonBody(t, createFileRequest{Meta: []byte("x")}), nil).StatusCode; status != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated meta update expected 401, got %d", status)
+	}
+}
+
+func TestStrangerGuessingCannotLockTheOwnerOut(t *testing.T) {
+	h := newHarnessTrusting(t, testClientIPHeader)
+	h.setupAccount()
+	for attempt := 0; attempt < freeAttempts; attempt++ {
+		h.loginFrom(strangerAddress, 9)
+	}
+	if status := h.loginFrom(strangerAddress, 9).StatusCode; status != http.StatusTooManyRequests {
+		t.Fatalf("stranger should be locked out after %d guesses, got %d", freeAttempts, status)
+	}
+	for round := 0; round < 4; round++ {
+		*h.clock = h.clock.Add(maxLockout + time.Second)
+		h.loginFrom(strangerAddress, 9)
+		if status := h.loginFrom(ownerAddress, 1).StatusCode; status != http.StatusOK {
+			t.Fatalf("round %d: owner with the right key from another address should get in, got %d", round, status)
+		}
+	}
+}
+
+func TestClientAddressHeaderIsIgnoredUnlessConfigured(t *testing.T) {
+	h := newHarness(t)
+	h.setupAccount()
+	for attempt := 0; attempt < freeAttempts; attempt++ {
+		h.loginFrom(fmt.Sprintf("203.0.113.%d", attempt+10), 9)
+	}
+	if status := h.loginFrom(ownerAddress, 9).StatusCode; status != http.StatusTooManyRequests {
+		t.Fatalf("a made-up address header must not reset the lockout, got %d", status)
+	}
+}
+
+func TestMalformedClientAddressFallsBackToTheConnection(t *testing.T) {
+	h := newHarnessTrusting(t, testClientIPHeader)
+	h.setupAccount()
+	for attempt := 0; attempt < freeAttempts; attempt++ {
+		h.loginFrom(fmt.Sprintf("not-an-address-%d", attempt), 9)
+	}
+	if status := h.loginFrom("still-not-an-address", 9).StatusCode; status != http.StatusTooManyRequests {
+		t.Fatalf("garbage address headers must count against the connection, got %d", status)
+	}
+}
+
+func (h *harness) guessFromManyAddresses(count int) {
+	for attempt := 0; attempt < count; attempt++ {
+		h.loginFrom(fmt.Sprintf("10.%d.%d.1", attempt/250, attempt%250), 9)
+	}
+}
+
+func TestGuessesFromManyAddressesHitTheOverallCeiling(t *testing.T) {
+	h := newHarnessTrusting(t, testClientIPHeader)
+	h.setupAccount()
+	h.guessFromManyAddresses(overallFreeAttempts)
+	if status := h.loginFrom(ownerNewAddress, 1).StatusCode; status != http.StatusTooManyRequests {
+		t.Fatalf("after %d failures from many addresses login should pause for addresses never seen before, got %d", overallFreeAttempts, status)
+	}
+	*h.clock = h.clock.Add(baseLockout + time.Second)
+	if status := h.loginFrom(ownerNewAddress, 1).StatusCode; status != http.StatusOK {
+		t.Fatalf("owner should get in once the overall pause ends, got %d", status)
+	}
+}
+
+func TestAddressThatSignedInBeforeIsNotHeldByTheOverallCeiling(t *testing.T) {
+	h := newHarnessTrusting(t, testClientIPHeader)
+	h.setupAccount()
+	if status := h.loginFrom(ownerAddress, 1).StatusCode; status != http.StatusOK {
+		t.Fatalf("owner first sign-in got %d", status)
+	}
+	h.guessFromManyAddresses(overallFreeAttempts)
+	for round := 0; round < 4; round++ {
+		if status := h.loginFrom(ownerNewAddress, 1).StatusCode; status != http.StatusTooManyRequests {
+			t.Fatalf("round %d: an address never seen before should wait out the overall pause, got %d", round, status)
+		}
+		if status := h.loginFrom(ownerAddress, 1).StatusCode; status != http.StatusOK {
+			t.Fatalf("round %d: owner from an address that signed in before should get in, got %d", round, status)
+		}
+		*h.clock = h.clock.Add(maxLockout + time.Second)
+		h.guessFromManyAddresses(1)
+	}
+	*h.clock = h.clock.Add(knownSourceMemory + time.Hour)
+	h.guessFromManyAddresses(1)
+	if status := h.loginFrom(ownerAddress, 1).StatusCode; status != http.StatusTooManyRequests {
+		t.Fatalf("an address unused for longer than %v should be forgotten, got %d", knownSourceMemory, status)
+	}
+}
+
+func TestWrongKeysCannotMakeAnAddressKnown(t *testing.T) {
+	h := newHarnessTrusting(t, testClientIPHeader)
+	h.setupAccount()
+	for attempt := 0; attempt < freeAttempts-1; attempt++ {
+		h.loginFrom(strangerAddress, 9)
+	}
+	h.guessFromManyAddresses(overallFreeAttempts)
+	if status := h.loginFrom(strangerAddress, 1).StatusCode; status != http.StatusTooManyRequests {
+		t.Fatalf("an address with only wrong keys must stay under the overall pause, got %d", status)
+	}
+}
+
+func TestKnownAddressesAreCappedOldestFirst(t *testing.T) {
+	current := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	auth, err := NewAuth(t.TempDir(), func() time.Time { return current })
+	if err != nil {
+		t.Fatal(err)
+	}
+	account := &Account{AuthDigest: digest(authKeyBytes(1))}
+	for index := 0; index <= maxKnownSources; index++ {
+		current = current.Add(time.Second)
+		if _, err := auth.Login(account, authKeyBytes(1), fmt.Sprintf("source-%d", index)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(auth.knownSources) != maxKnownSources {
+		t.Fatalf("expected %d known addresses, got %d", maxKnownSources, len(auth.knownSources))
+	}
+	if _, ok := auth.knownSources["source-0"]; ok {
+		t.Fatal("the oldest known address should have been dropped")
+	}
+	if _, ok := auth.knownSources[fmt.Sprintf("source-%d", maxKnownSources)]; !ok {
+		t.Fatal("the newest known address should be kept")
 	}
 }
