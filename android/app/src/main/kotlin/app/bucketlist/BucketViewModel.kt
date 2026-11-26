@@ -12,7 +12,9 @@ import androidx.lifecycle.viewModelScope
 import bucketlist.core.ApiException
 import bucketlist.core.BucketItem
 import bucketlist.core.BucketSession
+import bucketlist.core.LatestReleaseSource
 import bucketlist.core.ListSnapshot
+import bucketlist.core.UpdateNotice
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -50,6 +52,17 @@ class BucketViewModel(application: Application) : AndroidViewModel(application) 
     var biometricEnabled by mutableStateOf(environment.secrets.hasBiometricKey())
         private set
     var offerBiometric by mutableStateOf(false)
+        private set
+
+    private val updateNotice = UpdateNotice(
+        currentVersion = BuildConfig.VERSION_NAME,
+        store = UpdatePreferences(application.getSharedPreferences(UPDATE_PREFERENCES, Context.MODE_PRIVATE)),
+        fetchLatestVersion = LatestReleaseSource(LATEST_RELEASE_API, "BucketList/${BuildConfig.VERSION_NAME}")::latestVersion,
+        log = { Log.i(LOG_TAG, it) },
+    )
+    var availableUpdate by mutableStateOf<String?>(null)
+        private set
+    var updateChecksEnabled by mutableStateOf(updateNotice.checksEnabled)
         private set
 
     private var session: BucketSession? = null
@@ -264,7 +277,26 @@ class BucketViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun checkForUpdate() {
+        viewModelScope.launch {
+            availableUpdate = withContext(Dispatchers.IO) { updateNotice.checkIfDue() }
+        }
+    }
+
+    fun dismissUpdate() {
+        updateNotice.dismiss()
+        availableUpdate = null
+    }
+
+    fun toggleUpdateChecks() {
+        updateChecksEnabled = !updateChecksEnabled
+        updateNotice.turnChecks(updateChecksEnabled)
+        availableUpdate = updateNotice.availableVersion()
+        if (updateChecksEnabled) checkForUpdate()
+    }
+
     fun appStarted() {
+        checkForUpdate()
         lockJob?.cancel()
         lockJob = null
         if (unlocked) refresh()

@@ -27,11 +27,17 @@ Each item has a title, optional notes, the date it was added and the date it
 was done. Fingerprint unlock is offered after the first sign-in, and the app
 locks itself 30 seconds after it leaves the screen.
 
+Shortly after opening, and then at most once a day, the app asks GitHub for
+its latest release and shows "Version X is available" above the list when it
+is newer. Open goes to the release page; nothing is downloaded or installed.
+Dismiss hides that version only, and the menu (three dots) turns the check
+off. Besides your own server this is the only request the app makes.
+
 ---
 
 ## Download
 
-Get `BucketList-1.0.0.apk` from the [latest release](../../releases/latest).
+Get `BucketList-1.1.0.apk` from the [latest release](../../releases/latest).
 It asks for your server address the first time it opens.
 
 ---

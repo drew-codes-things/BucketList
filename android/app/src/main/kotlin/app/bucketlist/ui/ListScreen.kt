@@ -97,6 +97,7 @@ fun ListScreen(viewModel: BucketViewModel, authenticate: BiometricAuth) {
             contentPadding = PaddingValues(start = ListPadding, end = ListPadding, top = 4.dp, bottom = SpaceForAddButton),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            if (viewModel.availableUpdate != null) item { UpdateBanner(viewModel) }
             item { ProgressHeader(snapshot.done.size, snapshot.items.size) }
             if (snapshot.unreadableCount > 0) {
                 item { Text("${snapshot.unreadableCount} item(s) could not be opened with this passkey", color = MaterialTheme.colorScheme.error) }
@@ -232,10 +233,10 @@ private fun ListActions(viewModel: BucketViewModel, authenticate: BiometricAuth)
         IconButton(onClick = { viewModel.refresh() }) { Icon(Icons.Default.Refresh, "Refresh") }
     }
     IconButton(onClick = { viewModel.lock() }) { Icon(Icons.Default.Lock, "Lock") }
-    if (viewModel.biometricAvailable()) {
-        Box {
-            IconButton(onClick = { settingsOpen = true }) { Icon(Icons.Default.MoreVert, "Settings") }
-            DropdownMenu(expanded = settingsOpen, onDismissRequest = { settingsOpen = false }) {
+    Box {
+        IconButton(onClick = { settingsOpen = true }) { Icon(Icons.Default.MoreVert, "Settings") }
+        DropdownMenu(expanded = settingsOpen, onDismissRequest = { settingsOpen = false }) {
+            if (viewModel.biometricAvailable()) {
                 DropdownMenuItem(
                     text = { Text(if (viewModel.biometricEnabled) "Turn off fingerprint unlock" else "Turn on fingerprint unlock") },
                     onClick = {
@@ -244,6 +245,13 @@ private fun ListActions(viewModel: BucketViewModel, authenticate: BiometricAuth)
                     },
                 )
             }
+            DropdownMenuItem(
+                text = { Text(if (viewModel.updateChecksEnabled) "Turn off update check" else "Turn on update check") },
+                onClick = {
+                    settingsOpen = false
+                    viewModel.toggleUpdateChecks()
+                },
+            )
         }
     }
 }
